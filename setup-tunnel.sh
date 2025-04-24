@@ -19,7 +19,6 @@ echo "1) Install Tunnel (Iran Server)"
 echo "2) Install Tunnel (Foreign Server)"
 echo "3) Install Monitoring + Security"
 echo "4) Uninstall Tunnel Only"
-echo "5) Exit"
 echo -e "\e[1;31m6) Nuclear Uninstall - Remove Everything\e[0m"
 read -p "Choose an option (1-6): " choice
 
