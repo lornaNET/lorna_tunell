@@ -27,74 +27,64 @@ setup_rc_local() {
   chmod +x /etc/rc.local
 }
 
-install_iran() {
-  read -p "Enter Iran server IP: " ip_iran
-  read -p "Enter Foreign server IP: " ip_foreign
-  setup_rc_local
-  cat <<EOF >> /etc/rc.local
-ip tunnel add 6to4tun_IR mode sit remote $ip_foreign local $ip_iran || true
-ip -6 addr add 2001:470:1f10:e1f::1/64 dev 6to4tun_IR || true
-ip link set 6to4tun_IR mtu 1480
-ip link set 6to4tun_IR up
-ip -6 tunnel add GRE6Tun_IR mode ip6gre remote 2001:470:1f10:e1f::2 local 2001:470:1f10:e1f::1 || true
-ip addr add 172.16.1.1/30 dev GRE6Tun_IR || true
-ip link set GRE6Tun_IR mtu 1436
-ip link set GRE6Tun_IR up
-iptables -F
-iptables -X
-iptables -t nat -F
-iptables -t nat -X
-iptables -t mangle -F
-iptables -t mangle -X
-iptables -P INPUT DROP
-iptables -P FORWARD ACCEPT
-iptables -P OUTPUT ACCEPT
-iptables -A INPUT -i lo -j ACCEPT
-iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-iptables -A INPUT -p icmp -j ACCEPT
-iptables -t nat -A PREROUTING -j DNAT --to-destination 172.16.1.2
-iptables -t nat -A POSTROUTING -o GRE6Tun_IR -j MASQUERADE
-iptables -A INPUT -p tcp --dport 19999 -j ACCEPT
-sysctl -w net.ipv4.ip_forward=1
-echo "net.ipv4.ip_forward=1" > /etc/sysctl.conf
-sysctl -p
-systemctl restart netdata || true
+# Function to create multiple tunnels
+create_tunnels() {
+  local ip_type=$1
+  local ip_list=$2
+  local tunnel_type=$3
+  
+  for ip in ${ip_list[@]}; do
+    if [[ $ip_type == "iran" ]]; then
+      # Iran to foreign tunnel
+      echo "Creating tunnel to $ip (Iran)"
+      cat <<EOF >> /etc/rc.local
+ip tunnel add 6to4tun_IR_$ip mode sit remote $ip local $ip_foreign || true
+ip -6 addr add 2001:470:1f10:e1f::1/64 dev 6to4tun_IR_$ip || true
+ip link set 6to4tun_IR_$ip mtu 1480
+ip link set 6to4tun_IR_$ip up
+ip -6 tunnel add GRE6Tun_IR_$ip mode ip6gre remote 2001:470:1f10:e1f::2 local 2001:470:1f10:e1f::1 || true
+ip addr add 172.16.1.1/30 dev GRE6Tun_IR_$ip || true
+ip link set GRE6Tun_IR_$ip mtu 1436
+ip link set GRE6Tun_IR_$ip up
 EOF
+    else
+      # Foreign to Iran tunnel
+      echo "Creating tunnel to $ip (Foreign)"
+      cat <<EOF >> /etc/rc.local
+ip tunnel add 6to4tun_KH_$ip mode sit remote $ip_iran local $ip || true
+ip -6 addr add 2001:470:1f10:e1f::2/64 dev 6to4tun_KH_$ip || true
+ip link set 6to4tun_KH_$ip mtu 1480
+ip link set 6to4tun_KH_$ip up
+ip -6 tunnel add GRE6Tun_KH_$ip mode ip6gre remote 2001:470:1f10:e1f::1 local 2001:470:1f10:e1f::2 || true
+ip addr add 172.16.1.2/30 dev GRE6Tun_KH_$ip || true
+ip link set GRE6Tun_KH_$ip mtu 1436
+ip link set GRE6Tun_KH_$ip up
+EOF
+    fi
+  done
+}
+
+install_iran() {
+  read -p "How many Iran IPs do you want to tunnel? " num_iran_ips
+  read -p "Enter the list of Iran IPs (comma separated): " iran_ips
+  IFS=',' read -r -a iran_ips_array <<< "$iran_ips"
+  read -p "Enter Foreign server IP: " ip_foreign
+
+  setup_rc_local
+  create_tunnels "iran" "${iran_ips_array[@]}" "foreign"
+  
   echo -e "\e[1;32mIran Tunnel setup completed.\e[0m"
 }
 
 install_foreign() {
+  read -p "How many Foreign IPs do you want to tunnel? " num_foreign_ips
+  read -p "Enter the list of Foreign IPs (comma separated): " foreign_ips
+  IFS=',' read -r -a foreign_ips_array <<< "$foreign_ips"
   read -p "Enter Iran server IP: " ip_iran
-  read -p "Enter Foreign server IP: " ip_foreign
+  
   setup_rc_local
-  cat <<EOF >> /etc/rc.local
-ip tunnel add 6to4tun_KH mode sit remote $ip_iran local $ip_foreign || true
-ip -6 addr add 2001:470:1f10:e1f::2/64 dev 6to4tun_KH || true
-ip link set 6to4tun_KH mtu 1480
-ip link set 6to4tun_KH up
-ip -6 tunnel add GRE6Tun_KH mode ip6gre remote 2001:470:1f10:e1f::1 local 2001:470:1f10:e1f::2 || true
-ip addr add 172.16.1.2/30 dev GRE6Tun_KH || true
-ip link set GRE6Tun_KH mtu 1436
-ip link set GRE6Tun_KH up
-iptables -F
-iptables -X
-iptables -t nat -F
-iptables -t nat -X
-iptables -t mangle -F
-iptables -t mangle -X
-iptables -P INPUT DROP
-iptables -P FORWARD ACCEPT
-iptables -P OUTPUT ACCEPT
-iptables -A INPUT -i lo -j ACCEPT
-iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-iptables -A INPUT -p icmp -j ACCEPT
-iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-iptables -A INPUT -p tcp --dport 19999 -j ACCEPT
-sysctl -w net.ipv4.ip_forward=1
-echo "net.ipv4.ip_forward=1" > /etc/sysctl.conf
-sysctl -p
-systemctl restart netdata || true
-EOF
+  create_tunnels "foreign" "${foreign_ips_array[@]}" "iran"
+  
   echo -e "\e[1;32mForeign Tunnel setup completed.\e[0m"
 }
 
